@@ -29,6 +29,9 @@ enum Command {
     Build {
         force: bool,
         force_all: bool,
+        /// Limit parallelism to this many jobs (uses all cores by default)
+        #[bpaf(short, long, argument("NUM"))]
+        jobs: Option<usize>,
         #[bpaf(positional("PATH"), some("Need at least one target"))]
         targets: Vec<PathBuf>,
     },
@@ -123,6 +126,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Build {
             targets,
+            jobs,
             force,
             force_all,
         } => {
@@ -135,10 +139,11 @@ fn main() -> anyhow::Result<()> {
             // TODO: Include the number of logged messages in the tracefile
             // TODO: Warn if sources have been updated since the top-level build
             // was started (possibly restart the whole build?)
-            // TODO: Jobserver
             // TODO: systemd-run
+            let jobserver = get_jobserver(jobs)?;
             let mut threads = vec![];
             for target in targets {
+                let token = jobserver.acquire()?;
                 threads.push(std::thread::spawn(move || {
                     let target: LocalPath = target.into();
                     let _g = info_span!("build", %target).entered();
@@ -155,6 +160,7 @@ fn main() -> anyhow::Result<()> {
                     };
                     anyhow::Ok(line)
                 }));
+                std::mem::drop(token);
             }
             let tracefile = TraceFile::current()?;
             let mut errored = false;
@@ -214,6 +220,24 @@ fn main() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+fn get_jobserver(jobs: Option<usize>) -> anyhow::Result<jobserver::Client> {
+    if let Some(client) = unsafe { jobserver::Client::from_env() } {
+        return Ok(client);
+    }
+    let jobs = match jobs {
+        Some(x) => x,
+        None => std::thread::available_parallelism()?.into(),
+    };
+    let x = jobserver::Client::new(jobs)?;
+    let exe = std::env::current_exe()?;
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(args);
+    x.configure(&mut cmd);
+    let status = cmd.spawn()?.wait()?;
+    std::process::exit(status.code().unwrap_or(1));
 }
 
 fn which_do(target: Option<&Path>) -> anyhow::Result<()> {
