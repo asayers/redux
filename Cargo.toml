@@ -9,3 +9,16 @@ readme = "README.md"
 repository = "https://github.com/asayers/redux"
 
 [dependencies]
+anyhow = "1.0.89"
+blake3 = { version = "1.5.4", features = ["rayon", "mmap"] }
+bpaf = { version = "0.9.14", features = ["derive"] }
+gix = "0.66.0"
+globset = "0.4.15"
+humantime = "2.1.0"
+pathdiff = "0.2.1"
+termtree = "0.5.1"
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+uuid = { version = "1.10.0", features = ["v4"] }
+walkdir = "2.5.0"
+yansi = "1.0.1"
