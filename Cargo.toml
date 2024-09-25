@@ -1,0 +1,11 @@
+[package]
+name = "redux"
+description = "A redo implementation based on constructive traces"
+version = "0.1.0"
+edition = "2021"
+authors = ["Alex Sayers <alex@asayers.com>"]
+license = "Unlicense"
+readme = "README.md"
+repository = "https://github.com/asayers/redux"
+
+[dependencies]
