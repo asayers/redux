@@ -35,8 +35,6 @@ enum Command {
     #[bpaf(command)]
     Watch { target: PathBuf },
     /// Mark some data as a dependency of the current job (reads from stdin)
-    #[bpaf(command)]
-    Stamp,
     /// Show the dofile which builds a given target (or list all dofiles)
     #[bpaf(command)]
     Whichdo {
@@ -72,6 +70,9 @@ struct BuildOpts {
     /// Mark the given env var as contributing to the behaviour of this job
     #[bpaf(short, long, argument("VAR"))]
     env_var: Vec<String>,
+    /// Mark some data as a dependency of the current job (reads from stdin)
+    #[bpaf(short, long)]
+    stamp: bool,
     /// Don't re-use any files from the build cache (recursive)
     #[bpaf(short, long)]
     force: bool,
@@ -153,13 +154,6 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Command::Stamp => {
-            let mut hasher = blake3::Hasher::new();
-            std::io::copy(&mut std::io::stdin(), &mut hasher)?;
-            let hash = hasher.finalize();
-            let tracefile = TraceFile::current()?;
-            TraceFile::append(tracefile.as_ref(), TraceFileLine::Data(hash))?;
-        }
         Command::Build { build_opts } => build(build_opts)?,
     }
     Ok(())
@@ -170,6 +164,7 @@ fn build(opts: BuildOpts) -> anyhow::Result<()> {
         targets,
         volatile,
         env_var,
+        stamp,
         jobs,
         force,
     } = opts;
@@ -203,6 +198,14 @@ fn build(opts: BuildOpts) -> anyhow::Result<()> {
             tracefile.as_ref(),
             TraceFileLine::EnvVar(EnvVar { key, val }),
         )?;
+    }
+
+    if stamp {
+        let mut hasher = blake3::Hasher::new();
+        std::io::copy(&mut std::io::stdin(), &mut hasher)?;
+        let hash = hasher.finalize();
+        let tracefile = TraceFile::current()?;
+        TraceFile::append(tracefile.as_ref(), TraceFileLine::Data(hash))?;
     }
 
     // TODO: Include the number of logged messages in the tracefile
