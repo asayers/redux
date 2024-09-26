@@ -10,10 +10,6 @@ use std::time::SystemTime;
 use tracing::{error, info, info_span};
 use tracing_subscriber::{prelude::*, EnvFilter};
 
-// Make sure the given files are up-to-date
-//
-// If possible, redux will restore pre-built copies of the requested files.
-// If not, the files will be built based on their dofiles.
 #[derive(Bpaf)]
 struct Opts {
     #[bpaf(external)]
@@ -22,9 +18,9 @@ struct Opts {
 
 #[derive(Bpaf, Clone)]
 enum Command {
-    /// Make sure the given files are up-to-date
-    ///
-    /// If this is a job within a larger build, the files are marked as "needed"
+    /// Make sure the given files are up-to-date. If possible, redux will
+    /// restore pre-built copies of the requested files. If not, the files will
+    /// be built based on their dofiles.
     Build {
         #[bpaf(external)]
         build_opts: BuildOpts,
