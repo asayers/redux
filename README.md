@@ -5,39 +5,54 @@
 > 
 > * Expect API changes.  (You may need to update your dofiles.)
 > * Expect database format changes.  (You may need to delete your redux dir.)
-> * There no CHANGELOG yet.
+> * There's no CHANGELOG yet.
 > 
 > Don't use redux for anything serious until it hits version 1.0.
 
-Redux is an implementation of djb's "redo" build tool.  It's _roughly_
-source-compatible with [existing implementations][apenwarr], but internally it
-works quite differently.  Specifically, when redux builds a file, it also caches
-it.  Thereafter, the contents can simply be copied out of the cache whenever the
-sources match.  This means that:
+Redux is an implementation of djb's "redo" build tool.  The way you use it is
+similar to other redo implementations ([see below][deviations] for deviations);
+but internally it works quite differently.  Specifically, when redux builds a
+file, it also caches it.  Thereafter, the contents can simply be copied out of
+the cache whenever the sources match.  This means that:
 
 * switching to a branch and back again doesn't trigger a rebuild
 * reverting a commit doesn't trigger a rebuild
 * creating a new worktree doesn't trigger a rebuild
 
-The build cache is linked to the git repository, which means it is automatically
-shared between all worktrees.  In theory the cache could be shared between
-multiple machines or even multiple people by storing it in S3 (a la nix's
-"substituters" system), but this isn't implemented.
-
-As well as reusing pre-built dependencies, it also supports "early cutoff". This
-means that, if you add a comment to a source file, redux can notice that the
-resulting object file is identical and skip the rest of the build.  (Achieving
-this with redo requires [extra steps][early cutoff].)
+As well as reusing pre-built dependencies, it also supports "early cutoff".
+This means that, if you add a comment to a source file, redux can notice
+that the resulting object file is unchanged and skip the rest of the build.
+(Achieving this with redo requires [extra steps][early cutoff] but redux does
+it automatically.)
 
 In the language of [Build systems à la carte], most redo implementations use
 "verifying traces", whereas redux uses "constructive traces".  (Like other
 redos, it uses a "suspending" scheduler and supports monadic dependencies.)
 
+[deviations]: #differences_from_apenwarrs_redo
 [apenwarr]: https://github.com/apenwarr/redo
 [Build systems à la carte]: https://www.cambridge.org/core/services/aop-cambridge-core/content/view/097CE52C750E69BD16B78C318754C7A4/S0956796820000088a.pdf/build-systems-a-la-carte-theory-and-practice.pdf
 [early cutoff]: https://redo.readthedocs.io/en/latest/FAQSemantics/#if-a-target-is-identical-after-rebuilding-how-do-i-prevent-dependents-from-being-rebuilt
 
 ## Differences from apenwarr's redo
+
+redo                   | redux             
+-----------------------|-------------------
+`redo-ifchange <path>` | `redux <path>`
+`redo-always`          | `redux --always`
+`redo-stamp`           | `redux --stamp`
+`redo-whichdo`         | `redux --whichdo`
+
+In addition:
+
+* stdout is _not_ redirected to the target file.  You need to write to `$3`.
+  ([See also][stdout])
+* dofiles have to be executable (may change later)
+
+...and, of course, apenwarr's redo has been used and tested by many people for
+many years and surely has fewer bugs than redux.
+
+[stdout]: https://redo.readthedocs.io/en/latest/FAQSemantics/#isnt-it-confusing-to-capture-stdout-by-default
 
 ### Dofiles are only run for their output
 
@@ -72,7 +87,8 @@ Redux integrates with the local git repo.  This provides a few benefits:
   directory.
   * This means you don't even need to add anything to your .gitignore
     file.
-  * It also gives us the cross-workspace sharing mentioned above "for free".
+  * It also gives us the cross-workspace sharing mentioned in the introduction
+    "for free".
 * It gives us a sensible way to detect whether a file should be generated, or
   simply marked as a source: check whether it's checked-in or not.
 
@@ -92,20 +108,15 @@ whether a file is a source or not.
 
 [top-level]: https://redo.readthedocs.io/en/latest/FAQImpl/#how-does-redo-store-dependencies
 
-### Log-serialization
+### Log linearisation
 
 ...is not implemented yet.
 
 ### Other differences
 
-* stdout is not redirected to the target file.  You need to write to `$3`.  ([See also](https://redo.readthedocs.io/en/latest/FAQSemantics/#isnt-it-confusing-to-capture-stdout-by-default))
-* dofiles have to be executable (may change later)
-* redo-always is called `redux volatile` (and supports a `--cache-for` flag)
-* redo-whichdo is called `redux whichdo`
-* redo-stamp doesn't exist (all files are stamped!)
-* redo stores its database [as a sqlite file][sqlite], which is perfectly
-  sensible; but our database format is even simpler.  Take a peek in your
-  .git/redux/ and see for yourself!
+One final difference in implementation details: redo stores its database [as a
+sqlite file][sqlite], which is perfectly sensible; but our database format is
+even simpler.  Take a peek in your .git/redux/ and see for yourself!
 
 [sqlite]: https://redo.readthedocs.io/en/latest/FAQImpl/#isnt-using-sqlite3-overkill-and-un-djb-ish
 
@@ -126,7 +137,7 @@ deleted.
 
 ### How it works: Rule selection
 
-Same as redo.  You can inspect this with `redux whichdo`.
+Same as redo.  You can inspect this with `redux --whichdo`.
 
 ### How it works: Recording a trace
 
@@ -138,8 +149,8 @@ create the following files:
 * `foo/.redux_bar.txt.trace`
 
 As the script runs, it records a "trace", which is a log of the files it read
-as it ran.  Specifically, when you run `redux source` or `redux build`, it writes
-a line into the tracefile recording the hash of the given file.
+as it ran.  Specifically, whenever you run `redux`, it writes a line into the
+tracefile recording the hash of the given file.
 
 When the script finishes, redux renames the temp file, as explained above.  It
 also adds one final line to the tracefile, recording the hash of the produced
@@ -165,6 +176,9 @@ TODO: document
 
 TODO: implement
 
-## Sharing stores with others
+## Sharing the build cache
 
-TODO: implement
+The build cache is linked to the git repository, which means it is automatically
+shared between all worktrees.  In theory the cache could be shared between
+multiple machines or even multiple people by storing it in S3 (a la nix's
+"substituters" system), but this isn't implemented.
