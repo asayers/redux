@@ -44,11 +44,6 @@ enum Command {
     /// Mark some data as a dependency of the current job (reads from stdin)
     #[bpaf(command)]
     Stamp,
-    /// Mark the currently-running job as volatile
-    #[bpaf(command)]
-    Volatile {
-        cache_for: Option<humantime::Duration>,
-    },
     /// Show the dofile which builds a given target (or list all dofiles)
     #[bpaf(command)]
     Whichdo {
@@ -79,6 +74,8 @@ enum Command {
 
 #[derive(Bpaf, Clone)]
 struct BuildOpts {
+    #[bpaf(external, optional)]
+    volatile: Option<Volatile>,
     /// Don't re-use any files from the build cache (recursive)
     #[bpaf(short, long)]
     force: bool,
@@ -92,7 +89,7 @@ struct BuildOpts {
     )]
     jobs: usize,
     /// Mark these files as sources of this job (and rebuild them if necessary)
-    #[bpaf(positional("PATH"), some("Need at least one target"))]
+    #[bpaf(positional("PATH"))]
     targets: Vec<PathBuf>,
 }
 
@@ -100,6 +97,22 @@ fn jobs_fallback() -> usize {
     std::thread::available_parallelism()
         .map(|x| x.into())
         .unwrap_or(1)
+}
+
+// This prevents the user from specifying both --always and --after, since it
+// doesn't make much sense.  Of course they can always do it using multiple
+// `redux` invocations, but there's not much we can do about that.
+#[derive(Bpaf, Clone)]
+enum Volatile {
+    Always {
+        /// Mark this job's output as volatile
+        always: (),
+    },
+    After {
+        /// Allow this job's output to be re-used for this length of time
+        #[bpaf(argument("DURATION"))]
+        after: humantime::Duration,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -161,16 +174,6 @@ fn main() -> anyhow::Result<()> {
             let tracefile = TraceFile::current()?;
             TraceFile::append(tracefile.as_ref(), TraceFileLine::Data(hash))?;
         }
-        Command::Volatile { cache_for } => {
-            let tracefile = TraceFile::current()?;
-            if let Some(d) = cache_for {
-                let t = humantime::Timestamp::from(SystemTime::now() + *d);
-                TraceFile::append(tracefile.as_ref(), TraceFileLine::ValidUntil(t.into()))?;
-            } else {
-                let build_id = BuildId::current()?;
-                TraceFile::append(tracefile.as_ref(), TraceFileLine::ValidFor(build_id))?;
-            }
-        }
         Command::Build { build_opts } => build(build_opts)?,
     }
     Ok(())
@@ -179,18 +182,38 @@ fn main() -> anyhow::Result<()> {
 fn build(opts: BuildOpts) -> anyhow::Result<()> {
     let BuildOpts {
         targets,
+        volatile,
         jobs,
         force,
     } = opts;
-    let force = force || std::env::var(ENV_VAR_FORCE).is_ok();
-    // TODO: Include the number of logged messages in the tracefile
-    // TODO: Warn if sources have been updated since the top-level build
-    // was started (possibly restart the whole build?)
-    // TODO: systemd-run
+
     // NOTE: Read the implementation of get_jobserver() - it may restart
     // the current process!
     let needs_jobserver = targets.len() > jobs;
     let jobserver = needs_jobserver.then(|| get_jobserver(jobs)).transpose()?;
+
+    let force = force || std::env::var(ENV_VAR_FORCE).is_ok();
+    let tracefile = TraceFile::current()?;
+
+    if let Some(volatile) = volatile {
+        // TODO: Warn if volatile lines already exist in tracefile
+        let line = match volatile {
+            Volatile::Always { always: () } => {
+                let build_id = BuildId::current_or_new()?;
+                TraceFileLine::ValidFor(build_id)
+            }
+            Volatile::After { after: d } => {
+                let t = SystemTime::now() + *d;
+                TraceFileLine::ValidUntil(t)
+            }
+        };
+        TraceFile::append(tracefile.as_ref(), line)?;
+    }
+
+    // TODO: Include the number of logged messages in the tracefile
+    // TODO: Warn if sources have been updated since the top-level build
+    // was started (possibly restart the whole build?)
+    // TODO: systemd-run
     let mut threads = vec![];
     for target in targets {
         let token = needs_jobserver
@@ -214,7 +237,6 @@ fn build(opts: BuildOpts) -> anyhow::Result<()> {
         }));
         std::mem::drop(token);
     }
-    let tracefile = TraceFile::current()?;
     let mut errored = false;
     for th in threads {
         match th.join().unwrap() {
