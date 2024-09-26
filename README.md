@@ -1,6 +1,14 @@
 <h1 align="center">Redux</h1>
 <p align="center">/ˈriː.dʌks/ <em>(adj.)</em>: brought back</p>
 
+> NOTE: Still in-development!
+> 
+> * Expect API changes.  (You may need to update your dofiles.)
+> * Expect database format changes.  (You may need to delete your redux dir.)
+> * There no CHANGELOG yet.
+> 
+> Don't use redux for anything serious until it hits version 1.0.
+
 Redux is an implementation of djb's "redo" build tool.  It's _roughly_
 source-compatible with [existing implementations][apenwarr], but internally it
 works quite differently.  Specifically, when redux builds a file, it also caches
