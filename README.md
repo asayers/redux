@@ -182,3 +182,28 @@ The build cache is linked to the git repository, which means it is automatically
 shared between all worktrees.  In theory the cache could be shared between
 multiple machines or even multiple people by storing it in S3 (a la nix's
 "substituters" system), but this isn't implemented.
+
+## Redo's docs say hashing everything is dangerous?
+
+Apenwarr has [some objections][dangerous] to using constructive traces to
+implement a redo-like system.  In my opinion, this is the main point:
+
+[dangerous]: https://redo.readthedocs.io/en/latest/FAQImpl/#why-not-always-use-checksum-based-dependencies-instead-of-timestamps
+
+> Building stuff unnecessarily is much less dangerous than not building stuff that should be built.
+
+Redux is more aggressive about avoiding work than redo is.  This makes it less
+tolerant of buggy dofiles.
+
+Suppose your you have a "B.do" which reads A and produces B; but you forgot to
+`redux A`, so the dependency is undeclared. The first time you run `redux B`, it
+will build B based on the state of A at that point.  Thereafter, you can change
+A however you like, and `redux B` won't do anything.  But it's even worse: if
+you run `rm output; redux B`, it will restore A copy of B which was based on an
+old version of A.  The old contents of A are brought back from the dead!  This
+is indeed worse behaviour than redo, which will rebuild B in the second case.
+
+Apenwarr has a point, and the only response I can give is: bugs in your dofiles
+are bad. Perhaps redux's extra-bad reaction to these bugs will help to make
+them more noticeable?  Either way, I think we need better tools for debugging
+dofiles.
