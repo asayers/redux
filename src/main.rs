@@ -34,13 +34,6 @@ enum Command {
     Gc,
     #[bpaf(command)]
     Watch { target: PathBuf },
-    /// Mark the given env var as contributing to the behaviour of the current
-    // job
-    #[bpaf(command)]
-    EnvVar {
-        #[bpaf(positional("VAR"), some("Need at least one env var"))]
-        vars: Vec<String>,
-    },
     /// Mark some data as a dependency of the current job (reads from stdin)
     #[bpaf(command)]
     Stamp,
@@ -76,6 +69,9 @@ enum Command {
 struct BuildOpts {
     #[bpaf(external, optional)]
     volatile: Option<Volatile>,
+    /// Mark the given env var as contributing to the behaviour of this job
+    #[bpaf(short, long, argument("VAR"))]
+    env_var: Vec<String>,
     /// Don't re-use any files from the build cache (recursive)
     #[bpaf(short, long)]
     force: bool,
@@ -157,16 +153,6 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Command::EnvVar { vars } => {
-            let tracefile = TraceFile::current()?;
-            for key in vars {
-                let val = std::env::var(&key)?;
-                TraceFile::append(
-                    tracefile.as_ref(),
-                    TraceFileLine::EnvVar(EnvVar { key, val }),
-                )?;
-            }
-        }
         Command::Stamp => {
             let mut hasher = blake3::Hasher::new();
             std::io::copy(&mut std::io::stdin(), &mut hasher)?;
@@ -183,6 +169,7 @@ fn build(opts: BuildOpts) -> anyhow::Result<()> {
     let BuildOpts {
         targets,
         volatile,
+        env_var,
         jobs,
         force,
     } = opts;
@@ -208,6 +195,14 @@ fn build(opts: BuildOpts) -> anyhow::Result<()> {
             }
         };
         TraceFile::append(tracefile.as_ref(), line)?;
+    }
+
+    for key in env_var {
+        let val = std::env::var(&key)?;
+        TraceFile::append(
+            tracefile.as_ref(),
+            TraceFileLine::EnvVar(EnvVar { key, val }),
+        )?;
     }
 
     // TODO: Include the number of logged messages in the tracefile
