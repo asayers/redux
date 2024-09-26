@@ -147,10 +147,15 @@ fn main() -> anyhow::Result<()> {
             // TODO: Warn if sources have been updated since the top-level build
             // was started (possibly restart the whole build?)
             // TODO: systemd-run
-            let jobserver = get_jobserver(jobs)?;
+            // NOTE: Read the implementation of get_jobserver() - it may restart
+            // the current process!
+            let needs_jobserver = targets.len() > jobs;
+            let jobserver = needs_jobserver.then(|| get_jobserver(jobs)).transpose()?;
             let mut threads = vec![];
             for target in targets {
-                let token = jobserver.acquire()?;
+                let token = needs_jobserver
+                    .then(|| jobserver.as_ref().unwrap().acquire())
+                    .transpose()?;
                 threads.push(std::thread::spawn(move || {
                     let target: LocalPath = target.into();
                     let _g = info_span!("build", %target).entered();
