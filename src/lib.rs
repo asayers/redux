@@ -106,14 +106,14 @@ impl Drop for JobTmpFiles {
     }
 }
 
-pub fn build(target: &LocalPath, clean: bool) -> anyhow::Result<()> {
+pub fn build(target: &LocalPath, force: bool) -> anyhow::Result<()> {
     let rules = RuleSet::scan_for_do_files()?;
     let job = rules
         .job_for(target.clone())
         .ok_or_else(|| anyhow!("{}: No rule matching this path", target))?;
     debug!("Found rule {}", job.rule);
     let tmp_files = loop {
-        if !clean {
+        if !force {
             // Try to re-use a prior build, if there is one
             let restored = try_restore(&rules, &job)?;
             if restored {
@@ -132,7 +132,7 @@ pub fn build(target: &LocalPath, clean: bool) -> anyhow::Result<()> {
             }
         }
     };
-    actually_run(job, tmp_files)?;
+    actually_run(job, tmp_files, force)?;
     Ok(())
 }
 
@@ -184,7 +184,7 @@ pub const ENV_VAR_TRACEFILE: &str = "REDUX_TRACEFILE";
 pub const ENV_VAR_BUILD_ID: &str = "REDUX_BUILD_ID";
 pub const ENV_VAR_FORCE: &str = "REDUX_FORCE";
 
-fn actually_run(job: JobSpec, tmp_files: JobTmpFiles) -> anyhow::Result<Trace> {
+fn actually_run(job: JobSpec, tmp_files: JobTmpFiles, force: bool) -> anyhow::Result<Trace> {
     info!("Running rule to build file");
     let cmd = job.rule.to_abs();
     let job_dir = cmd.parent().unwrap();
@@ -201,6 +201,7 @@ fn actually_run(job: JobSpec, tmp_files: JobTmpFiles) -> anyhow::Result<Trace> {
         .arg(&tmp_files.out)
         .env(ENV_VAR_TRACEFILE, &tmp_files.trace.path)
         .env(ENV_VAR_BUILD_ID, build_id.0.to_string())
+        .envs(force.then_some((ENV_VAR_FORCE, "1")))
         .spawn()
         .context(format!(
             "Spawn cmd {} in {}",

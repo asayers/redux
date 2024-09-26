@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail};
 use bpaf::{Bpaf, Parser};
 use redux::{
     build, is_source, try_restore, Artifacts, BuildId, DepGraph, EnvVar, FileStamp, LocalPath,
-    RuleSet, TraceFile, TraceFileLine, ENV_VAR_FORCE
+    RuleSet, TraceFile, TraceFileLine, ENV_VAR_FORCE,
 };
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -27,8 +27,9 @@ enum Command {
     /// If this is a job within a larger build, the files are marked as "needed"
     // NOTE: No #[bpaf(command)] on this one - it's the default
     Build {
+        /// Don't re-use any files from the build cache (recursive)
+        #[bpaf(short, long)]
         force: bool,
-        force_all: bool,
         /// Limit parallelism to this many jobs (uses all cores by default)
         #[bpaf(short, long, argument("NUM"))]
         jobs: Option<usize>,
@@ -128,13 +129,7 @@ fn main() -> anyhow::Result<()> {
             targets,
             jobs,
             force,
-            force_all,
         } => {
-            if force_all {
-                unsafe {
-                    std::env::set_var(ENV_VAR_FORCE, "1");
-                }
-            }
             let force = force || std::env::var(ENV_VAR_FORCE).is_ok();
             // TODO: Include the number of logged messages in the tracefile
             // TODO: Warn if sources have been updated since the top-level build
