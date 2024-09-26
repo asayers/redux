@@ -1,8 +1,8 @@
 use anyhow::{anyhow, bail};
 use bpaf::{Bpaf, Parser};
 use redux::{
-    build, is_source, try_restore, Artifacts, BuildId, DepGraph, EnvVar, FileStamp, LocalPath,
-    RuleSet, TraceFile, TraceFileLine, ENV_VAR_FORCE,
+    is_source, try_restore, Artifacts, BuildId, DepGraph, EnvVar, FileStamp, LocalPath, RuleSet,
+    TraceFile, TraceFileLine, ENV_VAR_FORCE,
 };
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -27,20 +27,8 @@ enum Command {
     /// If this is a job within a larger build, the files are marked as "needed"
     // NOTE: No #[bpaf(command)] on this one - it's the default
     Build {
-        /// Don't re-use any files from the build cache (recursive)
-        #[bpaf(short, long)]
-        force: bool,
-        /// Limit parallelism to this many jobs (uses all cores by default)
-        #[bpaf(
-            short,
-            long,
-            argument("NUM"),
-            fallback(jobs_fallback()),
-            display_fallback
-        )]
-        jobs: usize,
-        #[bpaf(positional("PATH"), some("Need at least one target"))]
-        targets: Vec<PathBuf>,
+        #[bpaf(external)]
+        build_opts: BuildOpts,
     },
     #[bpaf(command)]
     Gc,
@@ -87,6 +75,25 @@ enum Command {
     Outputs { all: bool },
     #[bpaf(command)]
     Clean,
+}
+
+#[derive(Bpaf, Clone)]
+struct BuildOpts {
+    /// Don't re-use any files from the build cache (recursive)
+    #[bpaf(short, long)]
+    force: bool,
+    /// Limit parallelism to this many jobs (uses all cores by default)
+    #[bpaf(
+        short,
+        long,
+        argument("NUM"),
+        fallback(jobs_fallback()),
+        display_fallback
+    )]
+    jobs: usize,
+    /// Mark these files as sources of this job (and rebuild them if necessary)
+    #[bpaf(positional("PATH"), some("Need at least one target"))]
+    targets: Vec<PathBuf>,
 }
 
 fn jobs_fallback() -> usize {
@@ -137,68 +144,6 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Command::Build {
-            targets,
-            jobs,
-            force,
-        } => {
-            let force = force || std::env::var(ENV_VAR_FORCE).is_ok();
-            // TODO: Include the number of logged messages in the tracefile
-            // TODO: Warn if sources have been updated since the top-level build
-            // was started (possibly restart the whole build?)
-            // TODO: systemd-run
-            // NOTE: Read the implementation of get_jobserver() - it may restart
-            // the current process!
-            let needs_jobserver = targets.len() > jobs;
-            let jobserver = needs_jobserver.then(|| get_jobserver(jobs)).transpose()?;
-            let mut threads = vec![];
-            for target in targets {
-                let token = needs_jobserver
-                    .then(|| jobserver.as_ref().unwrap().acquire())
-                    .transpose()?;
-                threads.push(std::thread::spawn(move || {
-                    let target: LocalPath = target.into();
-                    let _g = info_span!("build", %target).entered();
-                    let is_source = is_source(&target)?;
-                    if !is_source {
-                        build(&target, force)?;
-                    }
-                    let stamp = FileStamp::new(target)?;
-                    Artifacts::new()?.insert(&stamp)?;
-                    let line = if is_source {
-                        TraceFileLine::Source(stamp)
-                    } else {
-                        TraceFileLine::Generated(stamp)
-                    };
-                    anyhow::Ok(line)
-                }));
-                std::mem::drop(token);
-            }
-            let tracefile = TraceFile::current()?;
-            let mut errored = false;
-            for th in threads {
-                match th.join().unwrap() {
-                    Ok(line) => TraceFile::append(tracefile.as_ref(), line)?,
-                    Err(e) => {
-                        error!("{e}");
-                        errored = true;
-                    }
-                }
-            }
-            if errored {
-                bail!("One of the build jobs failed");
-            }
-            if !force {
-                if let Some(TraceFile { job, .. }) = TraceFile::current()? {
-                    let rules = RuleSet::scan_for_do_files()?;
-                    let restored = try_restore(&rules, &job)?;
-                    if restored {
-                        info!("{job}: Looks like we can bail out at this point!");
-                        std::process::exit(102);
-                    }
-                }
-            }
-        }
         Command::EnvVar { vars } => {
             let tracefile = TraceFile::current()?;
             for key in vars {
@@ -224,6 +169,72 @@ fn main() -> anyhow::Result<()> {
             } else {
                 let build_id = BuildId::current()?;
                 TraceFile::append(tracefile.as_ref(), TraceFileLine::ValidFor(build_id))?;
+            }
+        }
+        Command::Build { build_opts } => build(build_opts)?,
+    }
+    Ok(())
+}
+
+fn build(opts: BuildOpts) -> anyhow::Result<()> {
+    let BuildOpts {
+        targets,
+        jobs,
+        force,
+    } = opts;
+    let force = force || std::env::var(ENV_VAR_FORCE).is_ok();
+    // TODO: Include the number of logged messages in the tracefile
+    // TODO: Warn if sources have been updated since the top-level build
+    // was started (possibly restart the whole build?)
+    // TODO: systemd-run
+    // NOTE: Read the implementation of get_jobserver() - it may restart
+    // the current process!
+    let needs_jobserver = targets.len() > jobs;
+    let jobserver = needs_jobserver.then(|| get_jobserver(jobs)).transpose()?;
+    let mut threads = vec![];
+    for target in targets {
+        let token = needs_jobserver
+            .then(|| jobserver.as_ref().unwrap().acquire())
+            .transpose()?;
+        threads.push(std::thread::spawn(move || {
+            let target: LocalPath = target.into();
+            let _g = info_span!("build", %target).entered();
+            let is_source = is_source(&target)?;
+            if !is_source {
+                redux::build(&target, force)?;
+            }
+            let stamp = FileStamp::new(target)?;
+            Artifacts::new()?.insert(&stamp)?;
+            let line = if is_source {
+                TraceFileLine::Source(stamp)
+            } else {
+                TraceFileLine::Generated(stamp)
+            };
+            anyhow::Ok(line)
+        }));
+        std::mem::drop(token);
+    }
+    let tracefile = TraceFile::current()?;
+    let mut errored = false;
+    for th in threads {
+        match th.join().unwrap() {
+            Ok(line) => TraceFile::append(tracefile.as_ref(), line)?,
+            Err(e) => {
+                error!("{e}");
+                errored = true;
+            }
+        }
+    }
+    if errored {
+        bail!("One of the build jobs failed");
+    }
+    if !force {
+        if let Some(TraceFile { job, .. }) = TraceFile::current()? {
+            let rules = RuleSet::scan_for_do_files()?;
+            let restored = try_restore(&rules, &job)?;
+            if restored {
+                info!("{job}: Looks like we can bail out at this point!");
+                std::process::exit(102);
             }
         }
     }
