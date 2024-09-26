@@ -172,13 +172,17 @@ impl BuildId {
     }
 
     fn current2() -> anyhow::Result<Option<BuildId>> {
-        match std::env::var("REDO_BUILD") {
+        match std::env::var(ENV_VAR_BUILD_ID) {
             Ok(x) => Ok(Some(BuildId(x.parse()?))),
             Err(std::env::VarError::NotPresent) => Ok(None),
             Err(e) => Err(e.into()),
         }
     }
 }
+
+pub const ENV_VAR_TRACEFILE: &str = "REDUX_TRACEFILE";
+pub const ENV_VAR_BUILD_ID: &str = "REDUX_BUILD_ID";
+pub const ENV_VAR_FORCE: &str = "REDUX_FORCE";
 
 fn actually_run(job: JobSpec, tmp_files: JobTmpFiles) -> anyhow::Result<Trace> {
     info!("Running rule to build file");
@@ -195,8 +199,8 @@ fn actually_run(job: JobSpec, tmp_files: JobTmpFiles) -> anyhow::Result<Trace> {
         // target filename atomically if your .do file returns a
         // zero (success) exit code
         .arg(&tmp_files.out)
-        .env("REDO_TRACEFILE", &tmp_files.trace.path)
-        .env("REDO_BUILD", build_id.0.to_string())
+        .env(ENV_VAR_TRACEFILE, &tmp_files.trace.path)
+        .env(ENV_VAR_BUILD_ID, build_id.0.to_string())
         .spawn()
         .context(format!(
             "Spawn cmd {} in {}",

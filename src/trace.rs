@@ -1,4 +1,4 @@
-use crate::{BuildId, FileStamp, LocalPath, RuleSet};
+use crate::{BuildId, FileStamp, LocalPath, RuleSet, ENV_VAR_TRACEFILE};
 use anyhow::{anyhow, bail};
 use std::{
     fmt,
@@ -289,7 +289,7 @@ impl TraceFile {
     }
 
     pub fn current() -> anyhow::Result<Option<TraceFile>> {
-        match std::env::var("REDO_TRACEFILE") {
+        match std::env::var(ENV_VAR_TRACEFILE) {
             Err(std::env::VarError::NotPresent) => Ok(None),
             Ok(path) => Ok(Some(TraceFile::open(path.into())?)),
             Err(e) => Err(e.into()),

@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail};
 use bpaf::{Bpaf, Parser};
 use redux::{
     build, is_source, try_restore, Artifacts, BuildId, DepGraph, EnvVar, FileStamp, LocalPath,
-    RuleSet, TraceFile, TraceFileLine,
+    RuleSet, TraceFile, TraceFileLine, ENV_VAR_FORCE
 };
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -132,10 +132,10 @@ fn main() -> anyhow::Result<()> {
         } => {
             if force_all {
                 unsafe {
-                    std::env::set_var("REDUX_FORCE", "1");
+                    std::env::set_var(ENV_VAR_FORCE, "1");
                 }
             }
-            let force = force || std::env::var("REDUX_FORCE").is_ok();
+            let force = force || std::env::var(ENV_VAR_FORCE).is_ok();
             // TODO: Include the number of logged messages in the tracefile
             // TODO: Warn if sources have been updated since the top-level build
             // was started (possibly restart the whole build?)
