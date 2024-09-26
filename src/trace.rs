@@ -91,9 +91,10 @@ impl JobSpec {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Default, PartialOrd, Ord)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Default)]
 pub struct Trace {
     pub env_vars: Vec<EnvVar>,
+    pub data: Vec<blake3::Hash>,
     pub sources: Vec<FileStamp>,
     pub intermediates: Vec<FileStamp>,
     pub outputs: Vec<FileStamp>,
@@ -140,6 +141,7 @@ impl Trace {
             TraceFileLine::Generated(x) => self.intermediates.push(x),
             TraceFileLine::Produced(x) => self.outputs.push(x),
             TraceFileLine::EnvVar(x) => self.env_vars.push(x),
+            TraceFileLine::Data(x) => self.data.push(x),
             TraceFileLine::ValidFor(x) => self.valid_for = Some(x),
             TraceFileLine::ValidUntil(t) => {
                 self.valid_until = match self.valid_until {
@@ -171,6 +173,7 @@ pub enum TraceFileLine {
     /// The output of the job
     Produced(FileStamp),
     EnvVar(EnvVar),
+    Data(blake3::Hash),
     // Data(),
     /// Job was non-deterministic and must be re-run, even if the sources/
     /// intermediates are up-to-date
@@ -188,6 +191,7 @@ impl fmt::Display for TraceFileLine {
             TraceFileLine::Generated(x) => write!(f, "generated {x}"),
             TraceFileLine::Produced(x) => write!(f, "produced {x}"),
             TraceFileLine::EnvVar(x) => write!(f, "env_var {x}"),
+            TraceFileLine::Data(x) => write!(f, "data {x}"),
             TraceFileLine::ValidFor(x) => write!(f, "valid_for {}", x.0),
             TraceFileLine::ValidUntil(x) => {
                 write!(f, "valid_until {}", humantime::Timestamp::from(*x))
@@ -206,6 +210,7 @@ impl FromStr for TraceFileLine {
             "generated" => TraceFileLine::Generated(y.parse()?),
             "produced" => TraceFileLine::Produced(y.parse()?),
             "env_var" => TraceFileLine::EnvVar(y.parse()?),
+            "data" => TraceFileLine::Data(y.parse()?),
             "valid_for" => TraceFileLine::ValidFor(BuildId(y.parse()?)),
             "valid_until" => TraceFileLine::ValidUntil(y.parse::<humantime::Timestamp>()?.into()),
             _ => bail!("Unknown line in tracefile: {}", x),

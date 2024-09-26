@@ -46,9 +46,9 @@ enum Command {
         #[bpaf(positional("VAR"), some("Need at least one env var"))]
         vars: Vec<String>,
     },
-    // /// Mark some data as a dependency of the current job (reads from stdin)
-    // #[bpaf(command)]
-    // Data { tag: Option<String> },
+    /// Mark some data as a dependency of the current job (reads from stdin)
+    #[bpaf(command)]
+    Stamp,
     /// Mark the currently-running job as volatile
     #[bpaf(command)]
     Volatile {
@@ -197,17 +197,13 @@ fn main() -> anyhow::Result<()> {
                 )?;
             }
         }
-        // Command::Data { tag } => {
-        //     let mut hasher = blake3::Hasher::new();
-        //     std::io::copy(&mut std::io::stdin(), &mut hasher)?;
-        //     let hash = hasher.finalize();
-        //     let tracefile = TraceFile::current()?;
-        //     match tag {
-        //         Some(tag) => TraceFile::append(tracefile.as_ref(), TraceFileLine::Data({tag}@{hash}))?,
-        //         None => TraceFile::append(tracefile.as_ref(), TraceFileLine::Data({hash}))?,
-        //     };
-        //     unimplemented!()
-        // }
+        Command::Stamp => {
+            let mut hasher = blake3::Hasher::new();
+            std::io::copy(&mut std::io::stdin(), &mut hasher)?;
+            let hash = hasher.finalize();
+            let tracefile = TraceFile::current()?;
+            TraceFile::append(tracefile.as_ref(), TraceFileLine::Data(hash))?;
+        }
         Command::Volatile { cache_for } => {
             let tracefile = TraceFile::current()?;
             if let Some(d) = cache_for {

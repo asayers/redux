@@ -4,7 +4,7 @@ use crate::{
     FileStamp, RuleSet,
 };
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fmt,
     path::PathBuf,
     sync::LazyLock,
@@ -68,12 +68,12 @@ impl fmt::Display for BuildTree {
 
 #[derive(Debug, Default)]
 pub struct DepGraph {
-    pub traces: BTreeMap<JobSpec, BTreeSet<Trace>>,
+    pub traces: BTreeMap<JobSpec, HashSet<Trace>>,
 }
 
 impl DepGraph {
     pub fn load_all() -> anyhow::Result<Self> {
-        let mut traces: BTreeMap<JobSpec, BTreeSet<Trace>> = BTreeMap::default();
+        let mut traces: BTreeMap<JobSpec, HashSet<Trace>> = BTreeMap::default();
         for dent in std::fs::read_dir(&*TRACES_DIR)? {
             let (job, trace) = TraceFile::read(&dent?.path())?;
             traces.entry(job).or_default().insert(trace);
