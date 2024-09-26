@@ -156,22 +156,23 @@ pub fn try_restore(rules: &RuleSet, job: &JobSpec) -> anyhow::Result<bool> {
 pub struct BuildId(pub Uuid);
 
 impl BuildId {
-    pub fn new() -> Self {
+    fn new() -> Self {
+        debug!("Created new build ID");
         BuildId(Uuid::new_v4())
     }
 
-    pub fn current() -> anyhow::Result<BuildId> {
-        Ok(Self::current2()?.unwrap_or_else(Self::new))
+    pub fn current_or_new() -> anyhow::Result<BuildId> {
+        Ok(Self::current()?.unwrap_or_else(Self::new))
     }
 
     pub fn is_current(self) -> bool {
-        match Self::current2() {
+        match Self::current() {
             Ok(Some(x)) => x == self,
             _ => false,
         }
     }
 
-    fn current2() -> anyhow::Result<Option<BuildId>> {
+    fn current() -> anyhow::Result<Option<BuildId>> {
         match std::env::var(ENV_VAR_BUILD_ID) {
             Ok(x) => Ok(Some(BuildId(x.parse()?))),
             Err(std::env::VarError::NotPresent) => Ok(None),
@@ -188,7 +189,7 @@ fn actually_run(job: JobSpec, tmp_files: JobTmpFiles, force: bool) -> anyhow::Re
     info!("Running rule to build file");
     let cmd = job.rule.to_abs();
     let job_dir = cmd.parent().unwrap();
-    let build_id = BuildId::current()?;
+    let build_id = BuildId::current_or_new()?;
     let mut child = std::process::Command::new(&cmd)
         .current_dir(job_dir)
         // the name of the target file
