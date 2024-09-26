@@ -31,8 +31,14 @@ enum Command {
         #[bpaf(short, long)]
         force: bool,
         /// Limit parallelism to this many jobs (uses all cores by default)
-        #[bpaf(short, long, argument("NUM"))]
-        jobs: Option<usize>,
+        #[bpaf(
+            short,
+            long,
+            argument("NUM"),
+            fallback(jobs_fallback()),
+            display_fallback
+        )]
+        jobs: usize,
         #[bpaf(positional("PATH"), some("Need at least one target"))]
         targets: Vec<PathBuf>,
     },
@@ -81,6 +87,12 @@ enum Command {
     Outputs { all: bool },
     #[bpaf(command)]
     Clean,
+}
+
+fn jobs_fallback() -> usize {
+    std::thread::available_parallelism()
+        .map(|x| x.into())
+        .unwrap_or(1)
 }
 
 fn main() -> anyhow::Result<()> {
@@ -213,14 +225,10 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn get_jobserver(jobs: Option<usize>) -> anyhow::Result<jobserver::Client> {
+fn get_jobserver(jobs: usize) -> anyhow::Result<jobserver::Client> {
     if let Some(client) = unsafe { jobserver::Client::from_env() } {
         return Ok(client);
     }
-    let jobs = match jobs {
-        Some(x) => x,
-        None => std::thread::available_parallelism()?.into(),
-    };
     let x = jobserver::Client::new(jobs)?;
     let exe = std::env::current_exe()?;
     let args = std::env::args().skip(1).collect::<Vec<_>>();
