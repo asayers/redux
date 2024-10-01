@@ -29,12 +29,14 @@ In the language of [Build systems à la carte], most redo implementations use
 "verifying traces", whereas redux uses "constructive traces".  (Like other
 redos, it uses a "suspending" scheduler and supports monadic dependencies.)
 
-[deviations]: #differences_from_apenwarrs_redo
+[deviations]: #differences-from-apenwarrs-redo
 [apenwarr]: https://github.com/apenwarr/redo
 [Build systems à la carte]: https://www.cambridge.org/core/services/aop-cambridge-core/content/view/097CE52C750E69BD16B78C318754C7A4/S0956796820000088a.pdf/build-systems-a-la-carte-theory-and-practice.pdf
 [early cutoff]: https://redo.readthedocs.io/en/latest/FAQSemantics/#if-a-target-is-identical-after-rebuilding-how-do-i-prevent-dependents-from-being-rebuilt
 
 ## Differences from apenwarr's redo
+
+The CLI is slightly different:
 
 redo                   | redux             
 -----------------------|-------------------
@@ -90,27 +92,35 @@ Redux integrates with the local git repo.  This provides a few benefits:
   * It also gives us the cross-workspace sharing mentioned in the introduction
     "for free".
 * It gives us a sensible way to detect whether a file should be generated, or
-  simply marked as a source: check whether it's checked-in or not.
+  simply marked as a source.
 
-I'll expand on that last point a bit.  To mark a source file as a dependency
-of the current job, you run `redux <path>`.  To build an intermediate file, you
-run `redux <path>`.  There's no difference!  This is a good thing, as it makes
-dofiles easier to write.
+I'll expand on that last point a bit:
 
-redux handles these cases differently, however, so we need a way to guess
-whether a given file is a source or a generated file. You might say "if there's
-a matching dofile, then it should be generated." But this falls down for
-projects which use a top-level "default.do".  In such projects, _all_ files
-would be marked as generated!
+* To mark a source file as a dependency of the current job, you run `redux <path>`.
+* To have redux build an intermediate dependency, you run `redux <path>`.
 
-But, with access to a git repo, this issue goes away: we can simply ask git
-whether a file is a source or not.
+There's no difference!  This is a good thing, as it makes your dofiles more
+flexible.  Having to specify whether a file is a source or an intermediate
+doesn't sounds like a lot of work for the user, but it's surprisingly
+constraining.
+
+But we have a problem, because redux needs to know whether it's being asked to
+rebuild a file or not. Since it's not explicit, we need a way to guess whether a
+given path is a source file or a generated file.
+
+You might say "if there's a matching dofile, then it should be generated."
+But this falls down for projects which use a top-level "default.do".  In such
+projects, _all_ files would be marked as generated!
+
+But, with access to a git repo, it's simple: if the file is checked-in to the
+git repo, then it's a source.
 
 [top-level]: https://redo.readthedocs.io/en/latest/FAQImpl/#how-does-redo-store-dependencies
 
 ### Log linearisation
 
-...is not implemented yet.
+...is not implemented yet.  (The plan is to redirect output to the systemd
+journal, if it's available.)
 
 ### Other differences
 
@@ -126,11 +136,13 @@ even simpler.  Take a peek in your .git/redux/ and see for yourself!
 
 You ask redux to build `foo/bar.txt`.
 
-1. It searches for the rule for that file.  Let's say it's `default.txt.do`.
-2. It creates a temporary file `foo/.redux_bar.txt.tmp` for the script to write to
-3. It runs the rule like so: `default.txt.do bar foo/bar.txt foo/.redux_bar.txt.tmp`
-4. `default.txt.do` writes into the temp file and returns exit code 0
-5. redux renames the temp file to `foo/bar.txt`
+1. redux searches for the rule for that file.  Let's say it's "default.txt.do".
+2. This file is a script, and redux executes it like so:
+   ```
+   default.txt.do bar foo/bar.txt foo/.redux_bar.txt.tmp
+   ```
+3. The script writes into "foo/.redux_bar.txt.tmp" and returns exit code 0
+4. redux renames the temp file to `foo/bar.txt`
 
 If the script returned a non-zero exit code, the temp file would instead be
 deleted.
@@ -141,16 +153,16 @@ Same as redo.  You can inspect this with `redux --whichdo`.
 
 ### How it works: Recording a trace
 
-When redux runs a rule, it creates two files: a temp file for the script to
-write to, as explained above; and a "tracefile".  So in our example, it would
-create the following files:
+When redux runs a rule, it creates  a "tracefile" for recording the job's
+dependencies.  So in our example:
 
-* `foo/.redux_bar.txt.tmp`
-* `foo/.redux_bar.txt.trace`
+* The target file is `foo/bar.txt`
+* The script is `default.txt.do`
+* The script writes to a temporary file at `foo/.redux_bar.txt.tmp`
+* And the tracefile lives at `foo/.redux_bar.txt.trace`
 
-As the script runs, it records a "trace", which is a log of the files it read
-as it ran.  Specifically, whenever you run `redux`, it writes a line into the
-tracefile recording the hash of the given file.
+Whenever the script runs `redux`, a line will be written into the tracefile
+recording the given file and a hash of its current contents.
 
 When the script finishes, redux renames the temp file, as explained above.  It
 also adds one final line to the tracefile, recording the hash of the produced
@@ -198,12 +210,16 @@ tolerant of buggy dofiles.
 Suppose your you have a "B.do" which reads A and produces B; but you forgot to
 `redux A`, so the dependency is undeclared. The first time you run `redux B`, it
 will build B based on the state of A at that point.  Thereafter, you can change
-A however you like, and `redux B` won't do anything.  But it's even worse: if
-you run `rm output; redux B`, it will restore A copy of B which was based on an
-old version of A.  The old contents of A are brought back from the dead!  This
-is indeed worse behaviour than redo, which will rebuild B in the second case.
+A however you like, and `redux B` won't do anything.  Fine; redo does this too.
 
-Apenwarr has a point, and the only response I can give is: bugs in your dofiles
-are bad. Perhaps redux's extra-bad reaction to these bugs will help to make
-them more noticeable?  Either way, I think we need better tools for debugging
-dofiles.
+But in redux it's even worse: if you run `rm B; redux B`, it will restore A
+copy of B which was based on an old version of A.  The old contents of A are
+magically brought back from the dead!  This is indeed worse behaviour than redo,
+which would rebuild B in this case.
+
+Apenwarr does have a point.  But bugs in your dofiles are bad no matter what
+redo implementation you use (other than [minimal do]). Perhaps redux's extra-bad
+reaction to these bugs will help to make them more noticeable? Either way, I
+think we need better tools for debugging dofiles.
+
+[minimal do]: https://github.com/apenwarr/redo/blob/main/minimal/do
