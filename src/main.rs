@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, ensure};
+use anyhow::{anyhow, bail};
 use bpaf::{Bpaf, Parser};
 use redux::{
     is_source, try_restore, Artifacts, BuildId, DepGraph, EnvVar, FileStamp, LocalPath, RuleSet,
@@ -184,6 +184,13 @@ fn parse_depfile(file: impl std::io::Read) -> anyhow::Result<HashMap<PathBuf, Ve
     for line in BufReader::new(file).lines() {
         let line = line?;
         let mut line = line.as_str();
+        if let Some(x) = line.find('#') {
+            line = &line[..x];
+        }
+        line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
         if target.is_none() {
             if let Some((x, y)) = line.split_once(':') {
                 target = Some(deps.entry(PathBuf::from(x)).or_default());
@@ -226,8 +233,7 @@ fn build(opts: BuildOpts) -> anyhow::Result<()> {
 
     if let Some(path) = depfile {
         let deps = parse_depfile(File::open(path)?)?;
-        ensure!(deps.len() == 1);
-        targets.extend(deps.into_values().next().unwrap());
+        targets.extend(deps.into_values().flatten());
     }
 
     // NOTE: Read the implementation of get_jobserver() - it may restart
