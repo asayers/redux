@@ -182,6 +182,9 @@ fn build(opts: BuildOpts) -> anyhow::Result<()> {
         jobs,
         force,
     } = opts;
+    if targets.is_empty() && volatile.is_none() && env_var.is_empty() && !stamp {
+        bail!("No targets specified");
+    }
 
     // NOTE: Read the implementation of get_jobserver() - it may restart
     // the current process!
