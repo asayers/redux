@@ -1,10 +1,12 @@
-use anyhow::{anyhow, bail};
+use anyhow::{anyhow, bail, ensure};
 use bpaf::{Bpaf, Parser};
 use redux::{
     is_source, try_restore, Artifacts, BuildId, DepGraph, EnvVar, FileStamp, LocalPath, RuleSet,
     TraceFile, TraceFileLine, ENV_VAR_FORCE, TRACES_DIR,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use tracing::{error, info, info_span};
@@ -84,6 +86,9 @@ struct BuildOpts {
     /// Mark some data as a dependency of the current job (reads from stdin)
     #[bpaf(short, long)]
     stamp: bool,
+    /// Read a GCC-style depfile and mark the contents as dependencies
+    #[bpaf(long, argument("PATH"))]
+    depfile: Option<PathBuf>,
     /// Don't re-use any files from the build cache (recursive)
     #[bpaf(short, long)]
     force: bool,
@@ -173,17 +178,56 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn parse_depfile(file: impl std::io::Read) -> anyhow::Result<HashMap<PathBuf, Vec<PathBuf>>> {
+    let mut deps = HashMap::<PathBuf, Vec<PathBuf>>::default();
+    let mut target = None;
+    for line in BufReader::new(file).lines() {
+        let line = line?;
+        let mut line = line.as_str();
+        if target.is_none() {
+            if let Some((x, y)) = line.split_once(':') {
+                target = Some(deps.entry(PathBuf::from(x)).or_default());
+                line = y;
+            } else {
+                bail!("Expected a target followed by a colon");
+            }
+        }
+        let cont = if let Some(x) = line.strip_suffix('\\') {
+            line = x;
+            true
+        } else {
+            false
+        };
+        target
+            .as_mut()
+            .unwrap()
+            .extend(line.split_whitespace().map(PathBuf::from));
+        if !cont {
+            target = None;
+        }
+    }
+    Ok(deps)
+}
+
 fn build(opts: BuildOpts) -> anyhow::Result<()> {
     let BuildOpts {
-        targets,
+        mut targets,
         volatile,
         env_var,
         stamp,
         jobs,
         force,
+        depfile,
     } = opts;
-    if targets.is_empty() && volatile.is_none() && env_var.is_empty() && !stamp {
+    if targets.is_empty() && volatile.is_none() && env_var.is_empty() && !stamp && depfile.is_none()
+    {
         bail!("No targets specified");
+    }
+
+    if let Some(path) = depfile {
+        let deps = parse_depfile(File::open(path)?)?;
+        ensure!(deps.len() == 1);
+        targets.extend(deps.into_values().next().unwrap());
     }
 
     // NOTE: Read the implementation of get_jobserver() - it may restart
