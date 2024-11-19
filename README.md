@@ -1,7 +1,8 @@
 <h1 align="center">Redux</h1>
 <p align="center">/ˈriː.dʌks/ <em>(adj.)</em>: brought back</p>
 
-> NOTE: Still in-development!
+> [!CAUTION]
+> Still in-development!
 > 
 > * Expect API changes.  (You may need to update your dofiles.)
 > * Expect database format changes.  (You may need to delete your redux dir.)
@@ -29,7 +30,7 @@ resulting object file is unchanged and skip the rest of the build. (Achieving
 this with other redos requires [extra steps][early cutoff] but redux does it
 automatically.)
 
-In the language of [Build systems à la carte], most redo implementations use
+In the taxonomy of [Build systems à la carte], most redo implementations use
 "verifying traces", whereas redux uses "constructive traces".  (Like other
 redos, it uses a "suspending" scheduler and supports monadic dependencies.)
 
@@ -64,9 +65,9 @@ side-effects, like "test.do" or "clean.do".  ([See also][unchanged])
 
 [unchanged]: https://redo.readthedocs.io/en/latest/FAQSemantics/#why-does-redo-target-redo-even-unchanged-targets
 
-Redux doesn't support this use-case - if you invoke `redux <target>`, it's
-because you want to ensure that `<target>` is up-to-date with its sources.  As
-a result:
+Redux doesn't support this use-case.  If you invoke `redux <target>`, it's
+because you want to ensure that `<target>` is up-to-date with its sources - and
+that's it.  As a result:
 
 * there's no `redo`/`redo-ifchange` distinction: redux will _always_ skip running
   the dofile if possible.
@@ -140,11 +141,12 @@ results of that dofile will remain valid for 10 minutes.  They will be re-used
 by all builds which occur within that timeframe.  If you run a new build more
 than 10 minutes later, the dofile will be run again.
 
-Note: volatile rules currently produce a new tracefile each time they run, which
-results in a lot of spam in your trace dir.  The plan is to add a `redux --gc`
-to clean these up, but it's not implemented yet.
+> [!NOTE]
+> Volatile rules currently produce a new tracefile each time they run, which
+> results in a lot of spam in your trace dir.  The plan is to add a `redux --gc`
+> to clean these up, but it's not implemented yet.
 
-### Parallelism by default
+### Parallel by default
 
 By default redo runs all jobs in serial; you can run a parallel build with
 `-jN`.  By default redux runs jobs in parallel;  if you want a serial build,
@@ -179,7 +181,7 @@ do_something_with <$tmpfile
 It's probably a better idea to give the `curl` its own rule though - then you
 can use `redux --after` and avoid re-downloading every single time.
 
-#### Aside: redux even support mid-rule cutoff!
+#### Aside: we can even do cutoff mid-job
 
 Suppose we run the rule in the example above.  It downloads `$url` and does
 something (slow) with it.  The rule contains `redux --stamp`, and is therefore
@@ -201,7 +203,7 @@ given file.
 redux can consume make-style depfiles.  These are the ".d" files you get when
 running `gcc -M`/`clang -M`.  It's a standard format supported by various build
 tools, such as [make][make-depfile] and [ninja][ninja-depfile].  redo doesn't
-support them natively (but there is [a plugin] [redo-depfile]).
+support them natively (but there is [a plugin][redo-depfile]).
 
 [make-depfile]: https://make.mad-scientist.net/papers/advanced-auto-dependency-generation
 [ninja-depfile]: https://ninja-build.org/manual.html#_depfile
@@ -279,13 +281,13 @@ TODO: implement
 
 The build cache is linked to the git repository, which means it is automatically
 shared between all worktrees.  In theory the cache could be shared between
-multiple machines or even multiple people by storing it in S3 (a la nix's
+multiple machines or even multiple people by storing it in S3 (à la nix's
 "substituters" system), but this isn't implemented.
 
 ## Redo's docs say hashing everything is dangerous?
 
 Apenwarr has [some objections][dangerous] to using constructive traces to
-implement a redo-like system.  In my opinion, this is the main point:
+implement a redo-like system.  In my opinion, this is his main point:
 
 [dangerous]: https://redo.readthedocs.io/en/latest/FAQImpl/#why-not-always-use-checksum-based-dependencies-instead-of-timestamps
 
