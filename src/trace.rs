@@ -1,5 +1,6 @@
 use crate::{BuildId, FileStamp, LocalPath, RuleSet, ENV_VAR_TRACEFILE};
 use anyhow::{anyhow, bail};
+use rustix::fs::{flock, FlockOperation};
 use std::{
     fmt,
     fs::File,
@@ -256,24 +257,50 @@ impl TraceFile {
             target.with_file_name(format!(".redux_{}.trace", filename))
         };
         std::fs::create_dir_all(path.parent().unwrap())?;
-        match File::create_new(&path) {
-            Ok(mut f) => {
-                // TODO: Lock the file
-                writeln!(f, "{}", TraceFileLine::Job(job.clone()))?;
-                writeln!(
-                    f,
-                    "{}",
-                    TraceFileLine::Source(FileStamp::new(job.rule.clone())?)
-                )?;
-                Ok(Some(TraceFile { path, job }))
-            }
+
+        // Try to create the tracefile
+        let mut f = match File::create_new(&path) {
+            Ok(f) => f,
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                // TODO: Check if the file is locked
-                info!("{}: A build job is already in progress", path.display());
-                Ok(None)
+                // There's already a tracefile for this target.  Is it stale?
+                let f = match File::open(&path) {
+                    Ok(f) => f,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        // They _just_ deleted it!  Try again.
+                        return Ok(None);
+                    }
+                    Err(e) => bail!("Opening {}: {e}", path.display()),
+                };
+                match flock(&f, FlockOperation::NonBlockingLockShared) {
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        // This is the expected case.  We just have to retry
+                        // until the other build finishes.
+                        info!("{}: A build job is already in progress", path.display());
+                        return Ok(None);
+                    }
+                    Ok(_) => {
+                        info!("{}: Deleting stale tracefile...", path.display());
+                        std::fs::remove_file(&path)?;
+                        return Ok(None);
+                    }
+                    Err(e) => bail!("Testing the flock on {}: {e}", path.display()),
+                }
             }
-            Err(e) => bail!("{}: {e}", path.display()),
-        }
+            Err(e) => bail!("Creating {}: {e}", path.display()),
+        };
+
+        // Ok, we created it.  Lock it so that other reduxes which come across
+        // can tell we're still alive
+        flock(&f, FlockOperation::NonBlockingLockExclusive)?;
+        // TODO: Check that no-one unlinked our file before we took the lock
+
+        writeln!(f, "{}", TraceFileLine::Job(job.clone()))?;
+        writeln!(
+            f,
+            "{}",
+            TraceFileLine::Source(FileStamp::new(job.rule.clone())?)
+        )?;
+        Ok(Some(TraceFile { path, job }))
     }
 
     pub fn finish(&self, output: FileStamp) -> anyhow::Result<()> {
