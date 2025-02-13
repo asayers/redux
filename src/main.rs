@@ -236,6 +236,12 @@ fn build(opts: BuildOpts) -> anyhow::Result<()> {
         targets.extend(deps.into_values().flatten());
     }
 
+    for target in &targets {
+        if target.is_dir() {
+            bail!("{}: Dir already exists at this path", target.display());
+        }
+    }
+
     // NOTE: Read the implementation of get_jobserver() - it may restart
     // the current process!
     let needs_jobserver = targets.len() > jobs;
