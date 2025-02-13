@@ -17,6 +17,7 @@ globset = "0.4.15"
 humantime = "2.1.0"
 jobserver = "0.1.32"
 pathdiff = "0.2.1"
+rustix = { version = "0.38.44", features = ["fs"] }
 termtree = "0.5.1"
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
