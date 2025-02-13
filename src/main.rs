@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail};
+use anyhow::{anyhow, bail, Context};
 use bpaf::{Bpaf, Parser};
 use redux::{
     is_source, try_restore, Artifacts, BuildId, DepGraph, EnvVar, FileStamp, LocalPath, RuleSet,
@@ -161,7 +161,9 @@ fn main() -> anyhow::Result<()> {
             for s in outputs {
                 if let Ok(stamp) = FileStamp::new(s.clone()) {
                     artifacts.insert(&stamp)?;
-                    std::fs::remove_file(s.to_abs())?;
+                    let p = s.to_abs();
+                    std::fs::remove_file(&p)
+                        .with_context(|| format!("Removing {}", p.display()))?;
                     println!(
                         "{}: Removed (available at {})",
                         s,
@@ -232,7 +234,9 @@ fn build(opts: BuildOpts) -> anyhow::Result<()> {
     }
 
     if let Some(path) = depfile {
-        let deps = parse_depfile(File::open(path)?)?;
+        let file =
+            File::open(&path).with_context(|| format!("Opening depfile {}", path.display()))?;
+        let deps = parse_depfile(file)?;
         targets.extend(deps.into_values().flatten());
     }
 
@@ -313,7 +317,7 @@ fn build(opts: BuildOpts) -> anyhow::Result<()> {
         match th.join().unwrap() {
             Ok(line) => TraceFile::append(tracefile.as_ref(), line)?,
             Err(e) => {
-                error!("{e}");
+                error!("{e:?}");
                 errored = true;
             }
         }

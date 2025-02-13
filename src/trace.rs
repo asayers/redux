@@ -1,5 +1,5 @@
 use crate::{BuildId, FileStamp, LocalPath, RuleSet, ENV_VAR_TRACEFILE};
-use anyhow::{anyhow, bail};
+use anyhow::{anyhow, bail, Context};
 use rustix::fs::{flock, FlockOperation};
 use std::{
     fmt,
@@ -256,7 +256,9 @@ impl TraceFile {
             let target = job.abs_target();
             target.with_file_name(format!(".redux_{}.trace", filename))
         };
-        std::fs::create_dir_all(path.parent().unwrap())?;
+        let parent = path.parent().unwrap();
+        std::fs::create_dir_all(&parent)
+            .with_context(|| format!("Creating dir {}", parent.display()))?;
 
         // Try to create the tracefile
         let mut f = match File::create_new(&path) {
@@ -280,7 +282,8 @@ impl TraceFile {
                     }
                     Ok(_) => {
                         info!("{}: Deleting stale tracefile...", path.display());
-                        std::fs::remove_file(&path)?;
+                        std::fs::remove_file(&path)
+                            .with_context(|| format!("Removing {}", path.display()))?;
                         return Ok(None);
                     }
                     Err(e) => bail!("Testing the flock on {}: {e}", path.display()),
@@ -291,7 +294,8 @@ impl TraceFile {
 
         // Ok, we created it.  Lock it so that other reduxes which come across
         // can tell we're still alive
-        flock(&f, FlockOperation::NonBlockingLockExclusive)?;
+        flock(&f, FlockOperation::NonBlockingLockExclusive)
+            .with_context(|| format!("Flocking {}", path.display()))?;
         // TODO: Check that no-one unlinked our file before we took the lock
 
         writeln!(f, "{}", TraceFileLine::Job(job.clone()))?;
@@ -308,7 +312,8 @@ impl TraceFile {
     }
 
     pub fn read(path: &Path) -> anyhow::Result<(JobSpec, Trace)> {
-        let txt = std::fs::read_to_string(path)?;
+        let txt =
+            std::fs::read_to_string(path).with_context(|| format!("Reading {}", path.display()))?;
         let (job, trace) = txt.split_once('\n').unwrap();
         let job = job.trim_start_matches("job ").parse()?;
         let trace = Trace::parse(trace)?;
