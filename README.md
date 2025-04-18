@@ -24,11 +24,10 @@ the cache whenever the sources match.  This means that you can:
 
 (...assuming these things have already been built at some point in the past.)
 
-As well as reusing pre-built dependencies, it also supports "early cutoff". This
-means that, if you add a comment to a source file, redux can notice that the
-resulting object file is unchanged and skip the rest of the build. (Achieving
-this with other redos requires [extra steps][early cutoff] but redux does it
-automatically.)
+Redux also supports "early cutoff".  This means that, if you add a comment to
+a source file, redux can notice that the resulting object file is unchanged and
+skip the rest of the build. (Achieving this with other redos requires [extra
+steps][early cutoff] but redux does it automatically.)
 
 In the taxonomy of [Build systems à la carte], most redo implementations use
 "verifying traces", whereas redux uses "constructive traces".  (Like other
@@ -41,20 +40,30 @@ redos, it uses a "suspending" scheduler and supports monadic dependencies.)
 
 ## Differences from apenwarr's redo
 
-The CLI is slightly different:
+Redux is a single binary, so the CLI is slightly different:
 
-redo                   | redux             | Notes
------------------------|-------------------|-----------------------------------------------------
-`redo-ifchange <path>` | `redux <path>`    | [See below](#dofiles-are-only-run-for-their-output)
-`redo-always`          | `redux --always`  | [See below](#more-flexible-redo-always)
-`redo-stamp`           | `redux --stamp`   | [See below](#you-probably-dont-need-redo-stamp)
-`redo-whichdo`         | `redux --whichdo` | It's the same!
+redo                   | redux                  | Notes
+-----------------------|------------------------|-----------------------------------------------------
+`redo-ifchange <path>` | `redux <path>`         |
+`redo <path>`          | `redux --force <path>` | [See below](#dofiles-are-only-run-for-their-output)
+`redo-ifcreate`        | (not implemented yet)  |
+`redo-always`          | `redux --always`       |
+(doesn't exist)        | `redux --after`        | [See below](#more-flexible-redo-always)
+`redo-stamp`           | `redux --stamp`        | But [you probably don't need it](#you-dont-need-redo-stamp)
+(doesn't exist)        | `redux --depfile`      | [See below](#depfiles)
+`redo-whichdo`         | `redux --whichdo`      |
+(doesn't exist)        | `redux --howdid`       | Shows the build tree which results in a given file
+`redo-sources`         | `redux --sources`      |
+`redo-targets`         | `redux --outputs`      |
+`rm $(redo-targets)`   | `redux --clean`        | Can also clean parts of the redux DB
+`redo-ood`             | (not implemented yet)  |
+`redo-log`             | (not implemented yet)  |
 
-In addition:
+dofiles work slightly differently:
 
 * stdout is _not_ redirected to the target file.  You need to write to `$3`.
   ([See also][stdout])
-* dofiles have to be executable (this may change later)
+* the file must be executable (this may change later)
 
 [stdout]: https://redo.readthedocs.io/en/latest/FAQSemantics/#isnt-it-confusing-to-capture-stdout-by-default
 
@@ -75,12 +84,18 @@ that's it.  As a result:
   (It's OK for the output file to be empty, but the dofile should create the
   file at least.)
 * redux may even start running the dofile and then bail out, part way through!
-  (This happens when it becomes clear that an existing cached file can be
-  re-used, and that running the remainder of the dofile is unnecessary.)  In
-  this case, anything already written to `$3` will be discarded.
+  Your dofiles just have to be OK with that.  In this case, anything already
+  written to `$3` will be discarded.
+  
+  (Sometimes redux can't tell initially whether a cached file can be re-used,
+  but after partially running the dofile it realised that it _can_ re-use
+  the old results.  In this case running the remainder of the dofile is
+  unnecessary.)
 
-If you have scripts which you want to run for their side-effects, there's no
-need for redux: just make a normal script ("clean.sh", "test.py", etc.).
+In other words, dofiles are expected to be pure functions from their inputs to
+their output.  If you have scripts which you want to run for their side-effects,
+there's no need for redux: just make a normal script ("clean.sh", "test.py",
+etc.).
 
 ### Must be run from a git repo
 
@@ -89,22 +104,22 @@ Redux integrates with the local git repo.  This provides a few benefits:
 * It tells us where the "top level" of the project is.  ([See also][top-level])
 * It gives us a convenient place to store the database: inside the .git
   directory.
-  * This means you don't even need to add anything to your .gitignore
-    file.
-  * It also gives us the cross-workspace sharing mentioned in the introduction
-    "for free".
-* It gives us a sensible way to detect whether a file should be generated, or
-  simply marked as a source.
+  * This means git will ignore the redux dir automatically - you don't need to
+    add anything to your .gitignore file.
+  * It also gives us cross-workspace cache sharing "for free", since all
+    workspaces will automatically use the same redux dir.
+* It gives us a sensible way to detect whether a file is a source file, or an
+  intermediate build artifact.
 
-I'll expand on that last point a bit:
+That last point is the important one.
 
 * To mark a source file as a dependency of the current job, you run `redux <path>`.
-* To have redux build an intermediate dependency, you run `redux <path>`.
+* To make redux build an intermediate dependency, you run `redux <path>`.
 
 There's no difference!  This is a good thing, as it makes your dofiles more
-flexible.  Having to specify whether a file is a source or an intermediate
-doesn't sounds like a lot of work for the user, but it's surprisingly
-constraining.
+flexible.  (You might think it's OK to force the user to specify whether a file
+is a source or an intermediate, but I tried that design and it's surprisingly
+annoying.)
 
 But we have a problem, because redux needs to know whether it's being asked to
 rebuild a file or not. Since it's not explicit, we need a way to guess whether a
@@ -119,10 +134,17 @@ git repo, then it's a source.
 
 [top-level]: https://redo.readthedocs.io/en/latest/FAQImpl/#how-does-redo-store-dependencies
 
-### No log linearisation
+### Parallel by default
 
-It's just not implemented yet.  (The plan is to redirect output to the systemd
-journal, if it's available.)
+By default redo runs all jobs in serial; you can run a parallel build with
+`-jN`.  By default redux runs jobs in parallel;  if you want a serial build,
+use `-j1`.
+
+Like redo, redux restricts parallelism by way of the "jobserver" protocol. This
+is the same mechanism used by various other tools, such as `make` and `cargo`.
+This means you can combine redux with other jobserver-aware tools without
+spawning too many threads.  For example, you could invoke redux from a Makefile,
+or invoke cargo within a dofile, and everything should just co-operate.
 
 ### More flexible redo-always
 
@@ -146,19 +168,53 @@ than 10 minutes later, the dofile will be run again.
 > results in a lot of spam in your trace dir.  The plan is to add a `redux --gc`
 > to clean these up, but it's not implemented yet.
 
-### Parallel by default
+### Depfiles
 
-By default redo runs all jobs in serial; you can run a parallel build with
-`-jN`.  By default redux runs jobs in parallel;  if you want a serial build,
-use `-j1`.
+redux can consume make-style depfiles.  These are the ".d" files you get when
+running `gcc -M`/`clang -M`.  It's a standard format supported by various build
+tools, such as [make][make-depfile] and [ninja][ninja-depfile].
 
-Like redo, redux restricts parallelism by way of the "jobserver" protocol. This
-is the same mechanism used by various other tools, such as `make` and `cargo`.
-This means you can combine redux with other jobserver-aware tools without
-spawning too many threads.  For example, you could invoke redux from a Makefile,
-or invoke cargo within a dofile, and everything should just co-operate.
+There is [a plugin][redo-depfile] which adds support for these files to
+apenwarr's redo, but it doesn't support them natively.
 
-### You (probably) don't need redo-stamp
+[make-depfile]: https://make.mad-scientist.net/papers/advanced-auto-dependency-generation
+[ninja-depfile]: https://ninja-build.org/manual.html#_depfile
+[redo-depfile]: https://github.com/tomolt/redo-depfile
+
+### Database format
+
+A difference in implementation details: redo stores its database [as a
+sqlite file][sqlite], which is perfectly sensible; but our database format is
+even simpler.  Take a peek in your .git/redux/ and see for yourself!
+
+[sqlite]: https://redo.readthedocs.io/en/latest/FAQImpl/#isnt-using-sqlite3-overkill-and-un-djb-ish
+
+### Quality
+
+Finally, the most important difference: apenwarr's redo has actual users!  It
+has been used and tested by many people for many years, and at this point has
+probably had most bugs hammered out of it.
+
+Redux, on the other hand, has no users, and is probably fairly bug-riddled!
+
+## Planned features
+
+* Log linearisation
+  * The plan is to redirect output to the systemd journal, a la `systemd-cat`, if
+    it's available.
+* Building from a specific git commit
+* Sharing the build cache
+  * The build cache is linked to the git repository, which means it is automatically
+    shared between all worktrees.  In theory the cache could be shared between
+    multiple machines or even multiple people by storing it in S3 (à la nix's
+    "substituters" system), but this isn't implemented.
+
+## Constructive traces
+
+The biggest difference redux and other redos is its use of "constructive
+traces".  This has some consequences which users need to be aware of:
+
+### You don't need redo-stamp
 
 In redo, `redo-stamp` is used to achieve early cutoff.  This is particularly
 important for rules which call `redo-always`, because without early cutoff such
@@ -195,31 +251,7 @@ It downloads `$url` and hashes `$tmpfile`. At this point redux sees that the
 hash is the same as last time the rule was run. It kills the job and restore the
 cached version of the output. Execution never reaches `do_something_with`.
 
-### Other differences
-
-redux has a `--howdid` command, which shows the build tree which results in a
-given file.
-
-redux can consume make-style depfiles.  These are the ".d" files you get when
-running `gcc -M`/`clang -M`.  It's a standard format supported by various build
-tools, such as [make][make-depfile] and [ninja][ninja-depfile].  redo doesn't
-support them natively (but there is [a plugin][redo-depfile]).
-
-[make-depfile]: https://make.mad-scientist.net/papers/advanced-auto-dependency-generation
-[ninja-depfile]: https://ninja-build.org/manual.html#_depfile
-[redo-depfile]: https://github.com/tomolt/redo-depfile
-
-A difference in implementation details: redo stores its database [as a
-sqlite file][sqlite], which is perfectly sensible; but our database format is
-even simpler.  Take a peek in your .git/redux/ and see for yourself!
-
-[sqlite]: https://redo.readthedocs.io/en/latest/FAQImpl/#isnt-using-sqlite3-overkill-and-un-djb-ish
-
-Finally, an important difference: apenwarr's redo has actual users!  It has been
-used and tested by many people for many years, and surely has many fewer bugs
-than redux.
-
-## Redo's docs say hashing everything is dangerous?
+### But redo's docs say hashing everything is dangerous?
 
 Apenwarr has [some objections][dangerous] to using constructive traces to
 implement a redo-like system.  In my opinion, this is his main point:
